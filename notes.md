@@ -287,3 +287,39 @@ x=1 at 0x7ff7bfeff2ac
 ```
 
 Same address, different values, which proves addresses are virtual.
+
+## Chapter 14
+
+In C, stack memory is managed by the compiler and heap memory is managed by the programmer.
+
+If you need a value to be available after its initializing function returns, it must be static or live on the heap.
+
+`malloc(sizeof(int))` - allocate space on the heap for an int, returning a pointer else NULL
+
+`sizeof` is an operator, usually evaluated at compile-time.
+
+`sizeof` on an array gives the array's size in bytes; on a pointer it gives the pointer's size. So after `int *x = malloc(10 * sizeof(int))`, `sizeof(x)` is the pointer size (e.g. 8), not 40.
+
+`free(ptr)` - free the heap memory allocated by the `malloc()` call which returned ptr
+
+`free` takes no size argument: the allocator tracks the size of each allocation itself, often in a header just before the allocated memory.
+
+`calloc(n, size)` - allocate and zero the memory.
+`realloc(ptr, size)` - resize an allocation, preserving contents.
+
+Common memory errors:
+- forgetting to allocate memory, e.g. in `strcpy(dst, src)` where `dst` is unallocated
+- not allocating enough memory
+- uninitialized read
+- memory leak
+- dangling pointer (use-after-free)
+- double free
+- invalid free
+
+Two levels of memory management:
+- by the OS, giving and reclaiming memory to processes
+- by a process, via e.g. malloc() and free()
+
+`malloc` and `free` are library calls, not system calls. They manage memory within the process's heap, calling down to the OS only when they need more: `brk`/`sbrk` to grow the heap, or `mmap` for anonymous memory.
+
+In short-lived programs memory leaks rarely cause trouble because the OS reclaims all a process's memory on exit.
