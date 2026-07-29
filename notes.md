@@ -320,6 +320,105 @@ Two levels of memory management:
 - by the OS, giving and reclaiming memory to processes
 - by a process, via e.g. malloc() and free()
 
-`malloc` and `free` are library calls, not system calls. They manage memory within the process's heap, calling down to the OS only when they need more: `brk`/`sbrk` to grow the heap, or `mmap` for anonymous memory.
+`malloc` and `free` are library calls, not system calls.
+They manage memory within the process's heap, calling down to the OS only when they need more.
+The `brk` and `sbrk` system calls grow the heap, or `mmap` for anonymous memory.
 
 In short-lived programs memory leaks rarely cause trouble because the OS reclaims all a process's memory on exit.
+
+`cc -g`  - produce debugging information in the OS's native format, usable by gdb
+`cc -Wall` - compile, 
+
+`gdb a.out` - run gdb against the a.out binary
+
+run valgrind's memcheck against myprog - `valgrind --leak-check=yes myprog`
+memcheck is the default tool
+--leak-check=yes turns on the detailed memory leak detector
+"It's worth fixing errors in the order they are reported, since later errors can be caused by earlier errors.
+
+## Chapter 15
+
+Assume to begin with that processes have contiguous, same-sized address spaces, smaller than physical memory.
+
+Static relocation was an early approach to address translation, where the loader rewrites an executable's addresses before running it.
+
+Two problems with static relocation:
+- low protection level
+- hard to move an address space mid-execution
+
+Dynamic relocation (aka base and bounds) is an approach to address translation, where all address referenced by a process are incremented by a base register and checked against a bound register.
+
+In dynamic relocation, what happens if a translated address is negative or out of bounds?
+The hardware atomically jumps to a handler registered by the OS at boot time.
+
+The memory management unit (MMU) is the part of the processor that helps with address translation.
+
+Dynamic relocation requires two registers per CPU, to store base and bound for the running process.
+
+A problem with dynamic relocation is internal fragmentation, i.e. wasted space in the memory allocated to a process.
+
+## Chapter 16
+
+Two issues with base and bounds:
+- wasted space between stack and heap
+- how to manage larger-than-memory address spaces?
+
+A segmentation fault is a memory access on a segmented machine to an illegal address.
+
+How does the hardware tell which segment an address is for?
+- explicit: encoded in reserved address bits
+- implicit: "how the address was formed" (don't get it)
+
+Use an extra register to flag whether a segment grows positive or negative.
+
+Example of how to calculate physical address:
+
+CONTEXT
+
+7 bit address space
+
+segment     base    limit    growth
+0           32      20       +
+1           512     20       -
+
+GIVEN virtual address 108 what is physical address?
+108 > 64 so segment 1, offset 44
+negative offset 44 - 64 = -20
+-20 is within limit
+so physical address is 512 - 20 = 492
+
+GIVEN virtual address 97 what is physical address?
+97 > 64 so segment 1, offset 33
+negative offset 33 - 64 = -31
+-31 > 20 so segmentation violation
+
+GIVEN virtual address 10 what is physical address?
+10 < 64 so segment 0
+10 < 20 so in bounds
+so 10 + 32 = 42
+
+GIVEN physical address 511 what is virtual address?
+need negative offset -1
+so offset 63
+segment 1
+so 64 + 63 = 127 i.e. 1111111
+
+GIVEN physical address 18 what is virtual address?
+need offset 18 onto base 0
+so 18
+
+What are valid virtual addresses?
+[0, 20) and [64, 84)
+
+What are valid physical addresses?
+[32, 51) and [492, 511)
+
+To support sharing memory, we use a few more bits to mark segment permissions.
+More work for hardware: has to check if access is permitted.
+
+External fragmentation: small chunks of free space between segments.
+Approaches:
+- compact
+- 
+
+Distinguish max segment size (the largest segment the VA system can support) from bounds (the size allocated by the OS to that segment).
