@@ -3,13 +3,11 @@
 
 int *foo() {
   int x = 123;
-  printf("%d\n", x);
   return &x;
 }
 
 void bar() {
   int y = 456;
-  printf("%d\n", y);
 }
 
 int main(int argc, char *argv[]) {

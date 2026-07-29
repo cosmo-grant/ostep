@@ -298,7 +298,8 @@ If you need a value to be available after its initializing function returns, it 
 
 `sizeof` is an operator, usually evaluated at compile-time.
 
-`sizeof` on an array gives the array's size in bytes; on a pointer it gives the pointer's size. So after `int *x = malloc(10 * sizeof(int))`, `sizeof(x)` is the pointer size (e.g. 8), not 40.
+`sizeof` on an array gives the array's size in bytes; on a pointer it gives the pointer's size.
+So after `int *x = malloc(10 * sizeof(int))`, `sizeof(x)` is the pointer size (e.g. 8), not 40.
 
 `free(ptr)` - free the heap memory allocated by the `malloc()` call which returned ptr
 
@@ -317,80 +318,120 @@ Common memory errors:
 - invalid free
 
 Two levels of memory management:
-- by the OS, giving and reclaiming memory to processes
-- by a process, via e.g. malloc() and free()
+- by the OS, giving memory to and reclaiming memory from a process
+- by a process, allocating and freeing within the memory it's been given.
 
 `malloc` and `free` are library calls, not system calls.
-They manage memory within the process's heap, calling down to the OS only when they need more.
-The `brk` and `sbrk` system calls grow the heap, or `mmap` for anonymous memory.
+
+`malloc` makes a system call (e.g. brk(addr) or sbrk(delta)) only when the process needs to increase the heap segment size.
+
+The program break is the end of a process's heap segment.
+
+The brk(addr) system call sets the program break to addr.
+The sbrk(delta) system call moves the program break by delta, returning the old break.
 
 In short-lived programs memory leaks rarely cause trouble because the OS reclaims all a process's memory on exit.
 
-`cc -g`  - produce debugging information in the OS's native format, usable by gdb
-`cc -Wall` - compile, 
+cc -g  - produce debugging information in the OS's native format, usable by gdb
+cc -Wall prog.c - compile prog.c, enabling core warnings
 
-`gdb a.out` - run gdb against the a.out binary
+gdb a.out - run gdb against the a.out binary
 
-run valgrind's memcheck against myprog - `valgrind --leak-check=yes myprog`
+run valgrind's memcheck against myprog - valgrind --leak-check=yes myprog
 memcheck is the default tool
 --leak-check=yes turns on the detailed memory leak detector
-"It's worth fixing errors in the order they are reported, since later errors can be caused by earlier errors.
+"It's worth fixing errors in the order they are reported, since later errors can be caused by earlier errors."
 
 ## Chapter 15
 
-Assume to begin with that processes have contiguous, same-sized address spaces, smaller than physical memory.
-
-Static relocation was an early approach to address translation, where the loader rewrites an executable's addresses before running it.
+Static relocation was an early address translation mechanism, where a loader rewrites an executable's addresses before running it.
+E.g. program's base is 3000, code has `movl 1000, %eax` then the loader rewrites it as `movl 4000, %eax`.
 
 Two problems with static relocation:
-- low protection level
+- no protection against out-of-bounds addresses computed at runtime
 - hard to move an address space mid-execution
 
-Dynamic relocation (aka base and bounds) is an approach to address translation, where all address referenced by a process are incremented by a base register and checked against a bound register.
+Base and bounds (aka dynamic relocation) is an address translation mechanism, where all addresses referenced by a process are incremented by the base and checked against the bound.
 
-In dynamic relocation, what happens if a translated address is negative or out of bounds?
-The hardware atomically jumps to a handler registered by the OS at boot time.
+In dynamic relocation, what happens if a translated address is out of bounds?
+The hardware atomically jumps to a handler registered by the OS at boot time, which typically terminates the process.
 
 The memory management unit (MMU) is the part of the processor that helps with address translation.
 
-Dynamic relocation requires two registers per CPU, to store base and bound for the running process.
+The base and bounds address translation mechanism requires two registers per CPU, to store the running process's base and bound.
 
-A problem with dynamic relocation is internal fragmentation, i.e. wasted space in the memory allocated to a process.
+Why is base and bounds cheap?
+Just two operations (add base, compare bound), in hardware.
+
+Given base and bounds, how can the OS relocate a process's memory?
+While the process is paused, copy its memory then update its base.
 
 ## Chapter 16
 
-Two issues with base and bounds:
-- wasted space between stack and heap
-- how to manage larger-than-memory address spaces?
+A key issue with having a single base and bound for the running process:
+- the OS must reserve one contiguous block [base, base + bound)
+- a big bound means wasted space (internal fragmentation)
+- a small bound risks running out of space
 
-A segmentation fault is a memory access on a segmented machine to an illegal address.
+Visualize internal fragmentation:
+
+```
+0KB     ┌──────────────┐
+        │     code     │
+2KB     ├──────────────┤
+        │     heap     │
+4KB     ├──────────────┤
+        │              │
+        │              │
+        │  (reserved   │
+        │  but unused) │
+        │              │
+        │              │
+510KB   ├──────────────┤
+        │    stack     │
+512KB   └──────────────┘
+```
+
+Segmentation is an address translation mechanism, where you store a base and bound _per segment_.
+
+Two benefits of segmentation:
+- supports sparse address spaces
+- it allows for code sharing between processes
+
+The term "segmentation fault" originates from a memory access on a segmented machine to an illegal address.
 
 How does the hardware tell which segment an address is for?
+Two approaches:
 - explicit: encoded in reserved address bits
-- implicit: "how the address was formed" (don't get it)
+- implicit: based on the address's source, e.g. PC -> code, from frame pointer -> stack
+
+Advantage of explicit versus implicit: addresses are self-describing.
+Disadvantage of explicit versus implicit: costs address bits (e.g. 2 bits for 4 segments).
 
 Use an extra register to flag whether a segment grows positive or negative.
 
-Example of how to calculate physical address:
+Examples of how to calculate physical address:
 
 CONTEXT
 
 7 bit address space
 
-segment     base    limit    growth
-0           32      20       +
-1           512     20       -
+seg high bit │ base │ limit │ growth
+─────────────┼──────┼───────┼───────
+0            │ 32   │ 20    │ +
+1            │ 512  │ 20    │ -
+
 
 GIVEN virtual address 108 what is physical address?
-108 > 64 so segment 1, offset 44
+108 >= 64 so segment 1, offset 44
 negative offset 44 - 64 = -20
 -20 is within limit
 so physical address is 512 - 20 = 492
 
 GIVEN virtual address 97 what is physical address?
-97 > 64 so segment 1, offset 33
+97 >= 64 so segment 1, offset 33
 negative offset 33 - 64 = -31
--31 > 20 so segmentation violation
+magnitude -31 > 20 so segmentation violation
 
 GIVEN virtual address 10 what is physical address?
 10 < 64 so segment 0
@@ -403,22 +444,44 @@ so offset 63
 segment 1
 so 64 + 63 = 127 i.e. 1111111
 
-GIVEN physical address 18 what is virtual address?
-need offset 18 onto base 0
-so 18
+GIVEN physical address 40 what is virtual address?
+need offset 8 onto base 32
+so 8 
 
 What are valid virtual addresses?
-[0, 20) and [64, 84)
+[0, 20) and [108, 128).
 
 What are valid physical addresses?
-[32, 51) and [492, 511)
+[32, 52) and [492, 512)
 
 To support sharing memory, we use a few more bits to mark segment permissions.
-More work for hardware: has to check if access is permitted.
+More work for hardware: it has to check if access is permitted.
 
-External fragmentation: small chunks of free space between segments.
-Approaches:
-- compact
-- 
+A key issue with segmentation is external fragmentation: small holes of free space between segments.
 
-Distinguish max segment size (the largest segment the VA system can support) from bounds (the size allocated by the OS to that segment).
+Visualize external fragmentation:
+
+```
+0KB     ┌──────────────┐
+        │  OS          │
+8KB     ├──────────────┤
+        │  (free)      │
+14KB    ├──────────────┤
+        │  P1 code     │
+20KB    ├──────────────┤
+        │  (free)      │
+24KB    ├──────────────┤
+        │  P2 heap     │
+34KB    ├──────────────┤
+        │  (free)      │
+39KB    ├──────────────┤
+        │  P1 stack    │
+48KB    └──────────────┘
+```
+Two approaches to mitigating external fragmentation:
+- compact, i.e. rearrange segments in memory to avoid small holes
+- free-list management, i.e. allocate memory carefully to minimize small holes 
+
+Kinds of fragmentation:
+- internal: space which is mapped (by the OS) but unallocated (by the process)
+- external: unmapped space between segments, enough in total but not enough individually for the request in hand
