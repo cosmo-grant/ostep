@@ -376,20 +376,20 @@ A key issue with having a single base and bound for the running process:
 Visualize internal fragmentation:
 
 ```
-0KB     ┌──────────────┐
-        │     code     │
-2KB     ├──────────────┤
-        │     heap     │
-4KB     ├──────────────┤
-        │              │
-        │              │
-        │  (reserved   │
-        │  but unused) │
-        │              │
-        │              │
-510KB   ├──────────────┤
-        │    stack     │
-512KB   └──────────────┘
+0KB     +--------------+
+        |     code     |
+2KB     +--------------+
+        |     heap     |
+4KB     +--------------+
+        |              |
+        |              |
+        | (mapped but  |
+        | unallocated) |
+        |              |
+        |              |
+510KB   +--------------+
+        |    stack     |
+512KB   +--------------+
 ```
 
 Segmentation is an address translation mechanism, where you store a base and bound _per segment_.
@@ -416,10 +416,10 @@ CONTEXT
 
 7 bit address space
 
-seg high bit │ base │ limit │ growth
-─────────────┼──────┼───────┼───────
-0            │ 32   │ 20    │ +
-1            │ 512  │ 20    │ -
+seg high bit | base | limit | growth
+-------------+------+-------+-------
+0            | 32   | 20    | +
+1            | 512  | 20    | -
 
 
 GIVEN virtual address 108 what is physical address?
@@ -462,26 +462,357 @@ A key issue with segmentation is external fragmentation: small holes of free spa
 Visualize external fragmentation:
 
 ```
-0KB     ┌──────────────┐
-        │  OS          │
-8KB     ├──────────────┤
-        │  (free)      │
-14KB    ├──────────────┤
-        │  P1 code     │
-20KB    ├──────────────┤
-        │  (free)      │
-24KB    ├──────────────┤
-        │  P2 heap     │
-34KB    ├──────────────┤
-        │  (free)      │
-39KB    ├──────────────┤
-        │  P1 stack    │
-48KB    └──────────────┘
+0KB     +--------------+
+        |  OS          |
+8KB     +--------------+
+        |  (free)      |
+14KB    +--------------+
+        |  P1 code     |
+20KB    +--------------+
+        |  (free)      |
+24KB    +--------------+
+        |  P2 heap     |
+34KB    +--------------+
+        |  (free)      |
+39KB    +--------------+
+        |  P1 stack    |
+48KB    +--------------+
 ```
+
 Two approaches to mitigating external fragmentation:
 - compact, i.e. rearrange segments in memory to avoid small holes
 - free-list management, i.e. allocate memory carefully to minimize small holes 
 
 Kinds of fragmentation:
 - internal: space which is mapped (by the OS) but unallocated (by the process)
-- external: unmapped space between segments, enough in total but not enough individually for the request in hand
+- external: unmapped space between segments, individually small but large in total
+
+Under segmentation, why support segments growing negatively, as well as positively?
+For compatibility, to support architectures where stack pushes decrement the stack pointer.
+
+
+## Chapter 17
+
+The data structure used to manage free space in the heap is called a free list (though needn't be a list).
+
+splitting -  allocate a chunk of a larger free node
+coalescing - after freeing a chunk, merge memory-adjacent free nodes
+compacting - rearranging allocated chunks so they're adjacent
+
+Why can't a C allocator compact allocated chunks?
+It invalidates pointers into the allocations, which the allocator can't fix up.
+
+The allocator maintains the free list in the free space itself.
+
+Visualize a heap from an allocator's point of view, just after initialization (assuming 4KB heap, starts at virtual address 16KB, 8 byte headers):
+
+```
+16384   +--------------------+  <-- head
+        | size: 4088         |
+        | next: 0            |
+16392   +--------------------+
+        |                    |
+        |       <free>       |
+        |                    |
+20480   +--------------------+
+```
+
+Given the heap above, visualize what happens for malloc(100):
+
+```
+16384   +--------------------+
+        | size: 100          |
+        | magic: 1234567     |
+16392   +--------------------+  <-- ptr
+        |                    |
+        |    <allocated>     |
+        |                    |
+16492   +--------------------+  <-- head
+        | size: 3980         |
+        | next: 0            |
+16500   +--------------------+
+        |                    |
+        |       <free>       |
+        |                    |
+20480   +--------------------+
+```
+
+Visualize the same heap after another malloc(100):
+
+```
+16384   +--------------------+
+        | size: 100          |
+        | magic: 1234567     |
+16392   +--------------------+  <-- ptr1
+        |                    |
+        |    <allocated>     |
+        |                    |
+16492   +--------------------+
+        | size: 100          |
+        | magic: 1234567     |
+16500   +--------------------+  <-- ptr2
+        |                    |
+        |    <allocated>     |
+        |                    |
+16600   +--------------------+  <-- head
+        | size: 3872         |
+        | next: 0            |
+16608   +--------------------+
+        |                    |
+        |       <free>       |
+        |                    |
+20480   +--------------------+
+```
+
+Given the heap above, visualize what happens for free(ptr1):
+
+```
+16384   +--------------------+  <-- head
+        | size: 100          |
+        | next: 16600        |
+16392   +--------------------+
+        |                    |
+        |       <free>       |
+        |                    |
+16492   +--------------------+
+        | size: 100          |
+        | magic: 1234567     |
+16500   +--------------------+  <-- ptr2
+        |                    |
+        |    <allocated>     |
+        |                    |
+16600   +--------------------+
+        | size: 3872         |
+        | next: 0            |
+16608   +--------------------+
+        |                    |
+        |       <free>       |
+        |                    |
+20480   +--------------------+
+```
+
+Given the heap above, visualize what happens for free(ptr2):
+
+```
+16384   +--------------------+
+        | size: 100          |
+        | next: 16600        |
+16392   +--------------------+
+        |                    |
+        |       <free>       |
+        |                    |
+16492   +--------------------+  <-- head
+        | size: 100          |
+        | next: 16384        |
+16500   +--------------------+
+        |                    |
+        |       <free>       |
+        |                    |
+16600   +--------------------+
+        | size: 3872         |
+        | next: 0            |
+16608   +--------------------+
+        |                    |
+        |       <free>       |
+        |                    |
+20480   +--------------------+
+```
+
+Coalescing would be handy!
+
+Inserting at the head is cheaper.
+Inserting in address-order makes coalescing easier, since memory-neighbours are list-neighbours.
+
+In what sense does the free list take up no space?
+Nodes are stored in the free space and can be converted to allocations.
+
+Why can't the allocator maintain the free list the same way user applications maintain similar data structures?
+Regress! The allocator is the service that allocates memory. It can't delegate memory allocation, as user applications can via malloc().
+
+Many allocators store extra information (e.g. size of allocated region) in a fixed-size header block, just before the chunk given to the caller.
+
+A magic number in an allocation header is a cheap heuristic integrity check that e.g. the passed ptr is valid.
+
+A "self-describing" heap stores metadata in headers next to the allocated chunk.
+Risk: an overflow corrupts the allocator itself.
+Advantage: size-free free().
+
+Where does the allocator keep the free list head?
+In the process's data segment.
+
+Strategies for satisfying malloc(size):
+name, selected chunk, motivation, cost
+best fit, smallest big-enough, keep big chunks intact, slow
+worst fit, largest big-enough, leave a usable chunk after splitting, slow (and bad fragmentation in practice)
+first fit, first big-enough, fast, splinters front of list
+next fit, first big-enough starting from where you last looked, fast and spreads splintering,
+
+Segregated lists are separate free lists, each dedicated to same- or similar-sized allocations.
+
+
+## Chapter 18
+
+Paging is an address translation mechanism, where you store fixed-size units of virtual memory ("pages") in fixed-size slots of physical memory ("page frames").
+
+To get a feel for sizes, 2^32 cm is roughly the length of the equator.
+
+Visualize paging, assuming two processes, a 6-bit address space each, 128 bytes of physical memory, and 16 byte pages:
+
+```
+0       +--------------------+
+        |  reserved for OS   |  frame 0
+16      +--------------------+
+        |     P2 page 0      |  frame 1
+32      +--------------------+
+        |     P1 page 3      |  frame 2
+48      +--------------------+
+        |     P1 page 0      |  frame 3
+64      +--------------------+
+        |      unmapped      |  frame 4
+80      +--------------------+
+        |     P1 page 2      |  frame 5
+96      +--------------------+
+        |     P2 page 1      |  frame 6
+112     +--------------------+
+        |     P1 page 1      |  frame 7
+128     +--------------------+
+```
+
+The OS usually stores a process's page-to-frame mapping in a data structure known as a page table.
+
+Assuming the address space as above, P1's virtual address 18 corresponds to which physical address?
+18 = 010010
+page 1, offset 2
+frame 7, offset 2
+so 114
+
+Assuming a 32-bit address space and 4KB pages, a virtual address divides into 2 parts: the high 20 bits are the page number and low 12 bits are the offset.
+
+32-bit address space, 4KB pages, 4 bytes per page table entry => 4MB page table. Big!
+
+Why can't page tables live on the chip, like base and bounds registers in segmentation?
+Far too big.
+
+A linear page table is an array whose i-th entry stores page i's frame number, plus some other information.
+
+In the example above, what is P1's linear page table?
+[3, 7, 5, 2]
+
+Paging avoids external fragmentation.
+
+How does the hardware know where to find the page table?
+A register.
+
+Things that might be stored in a page table entry, as well as a frame number:
+name, what it indicates
+valid bit, whether the page is mapped
+protection bits, whether the page can be read/written/executed
+present bit, whether the page is in physical memory (not e.g. swapped to disk)
+dirty bit, whether the page has been modified
+reference bit, whether the page has been accessed
+
+Paging can support sparse address spaces via a page table entry's valid bit, which flags whether the page is mapped to a frame.
+
+A naive paging implementation requires twice as many memory references, because each reference requires a page table lookup too.
+
+The key problems for a naive paging implementation:
+- costs space, because pages tables are big
+- slow, because many extra memory references
+
+## Chapter 19
+
+A common approach to speeding up OS operations is to get the hardware to do some of the work.
+
+A translation-lookaside buffer (TLB) is a hardware cache of page-to-frame-number translations.
+
+Paging without a TLB is unusably slow.
+
+Given the address space
+
+```
++--------------------+
+|                    |  page 0
+|                    |
+|                    |
+|                    |
++--------------------+
+|                    |  page 1
+| arr[0]             |
+| arr[1]             |
+| arr[2]             |
++--------------------+
+| arr[3]             |  page 2
+| arr[4]             |
+| arr[5]             |
+| arr[6]             |
++--------------------+
+| arr[7]             |  page 3
+| arr[8]             |
+| arr[9]             |
+|                    |
++--------------------+
+|                    |  page 4
+|                    |
+|                    |
+|                    |
++--------------------+
+```
+
+when freshly looping through `arr` what will the TLB hit rate be?
+70%
+
+Kinds of locality that improve the TLB hit rate:
+temporal: accessing an address you recently accessed (e.g. loop variables)
+spatial: accessing an address nearby one you recently accessed (e.g. iterating over an array)
+
+Processor architectures:
+Complex Instruction Set Computing (CISC): many, complex instructions
+Reduced Instruction Set Computing (RISC): few, simple instructions
+
+TLB lookups are always managed by the hardware.
+TLB misses may be handled by the hardware or the OS.
+
+Core hardware flow for a hardware-managed TLB:
+extract page number from virtual address
+look up tlb entry
+if hit
+  access physical address
+else
+  find page table entry
+  insert into tlb
+  retry instruction
+
+Core hardware flow for a software-managed TLB:
+extract page number from virtual address
+look up tlb entry
+if hit
+  access physical address
+else
+  raise tlb-miss exception
+
+After handling a TLB miss, the hardware or OS has to ensure that you re-execute the instruction that led to the miss, not the subsequent instruction.
+
+What is a key danger when the OS is handling a TLB miss?
+An infinite loop of TLB misses.
+
+The primary advantage of software-managed TLBs is flexibility: you can change the page table data structure.
+
+A typical hardware-managed TLB has 32, 64, or 128 entries and is fully associative, i.e. any translation can sit in any entry.
+
+TLB entry valid bit: flags whether the entry has been populated
+page table entry valid bit: flags whether the page is mapped
+
+How might a TLB cope with a context switch?
+flush when switching, i.e. set all valid bits to 0
+include an address space identifier (ASID) in each TLB entry
+
+Examples of TLB replacement policies:
+evict the least-recently used
+evict at random
+
+TLB coverage is the total memory which can be looked up via the TLB, i.e. page size * number of TLB entries.
+
+Give an adversarial case for the least-recently eviction policy in a TLB.
+Iterating a larger-than-TLB-coverage array, twice.
+
+Beware that "RAM isn't always RAM", i.e. from a program's point of view, RAM accesses take variable times, e.g. because of TLB misses.
