@@ -693,7 +693,7 @@ Assuming a 32-bit address space and 4KB pages, a virtual address divides into 2 
 Why can't page tables live on the chip, like base and bounds registers in segmentation?
 Far too big.
 
-A linear page table is an array whose i-th entry stores page i's frame number, plus some other information.
+A linear page table is an array of page table entries, whose i-th entry stores page i's frame number, plus some other information.
 
 In the example above, what is P1's linear page table?
 [3, 7, 5, 2]
@@ -730,32 +730,32 @@ Paging without a TLB is unusably slow.
 Given the address space
 
 ```
-+--------------------+
-|                    |  page 0
-|                    |
-|                    |
-|                    |
-+--------------------+
-|                    |  page 1
-| arr[0]             |
-| arr[1]             |
-| arr[2]             |
-+--------------------+
-| arr[3]             |  page 2
-| arr[4]             |
-| arr[5]             |
-| arr[6]             |
-+--------------------+
-| arr[7]             |  page 3
-| arr[8]             |
-| arr[9]             |
-|                    |
-+--------------------+
-|                    |  page 4
-|                    |
-|                    |
-|                    |
-+--------------------+
++------------+
+|            |  page 0
+|            |
+|            |
+|            |
++------------+
+|            |  page 1
+|   arr[0]   |
+|   arr[1]   |
+|   arr[2]   |
++------------+
+|   arr[3]   |  page 2
+|   arr[4]   |
+|   arr[5]   |
+|   arr[6]   |
++------------+
+|   arr[7]   |  page 3
+|   arr[8]   |
+|   arr[9]   |
+|            |
++------------+
+|            |  page 4
+|            |
+|            |
+|            |
++------------+
 ```
 
 when freshly looping through `arr` what will the TLB hit rate be?
@@ -816,3 +816,153 @@ Give an adversarial case for the least-recently eviction policy in a TLB.
 Iterating a larger-than-TLB-coverage array, twice.
 
 Beware that "RAM isn't always RAM", i.e. from a program's point of view, RAM accesses take variable times, e.g. because of TLB misses.
+
+## Chapter 20
+
+Problem: page tables are big.
+
+32-bit address space, 4KiB pages, 4 byte page table entry => 4MiB page table per process!
+
+A simple solution: use bigger pages.
+
+If you double the page size, what happens to the page table size?
+Halves.
+
+What is the major problem with using large pages?
+Incompletely used pages means lots of wasted space.
+
+If you use a _single_ linear page table for a process, it has to have an entry for each page.
+
+In a linear page table, why do you need entries even for unallocated pages?
+Placeholders, because the i-th entry stores page i's frame.
+
+Assuming a 4 GiB address space, 1 KiB pages, of which half are allocated, the page table has 2^21 invalid entries.
+That's a lot of wasted space - mere placeholder entries!
+
+In a segmentation-paging hybrid, you have a page table, plus base and bound registers, per segment.
+The base register holds the physical address of the segment's page table.
+The bounds register holds the number of entries.
+
+Why does a segmentation-paging hybrid reduce page table size?
+No need to store invalid entries for between-segment pages.
+
+Problems for a segmentation-paging hybrid:
+- a large but sparsely-used heap still requires lots of invalid page table entries
+- arbitrary-sized page tables, so harder/more wasteful to map
+
+Given a linear page table in physical memory:
+
+```
++-----+  frame 201
+| 12  |
+| 82  |
+|  -  |
+| 100 |
++-----+  frame 202 
+|  -  |
+|  -  |
+|  -  |
+|  -  |
++-----+  frame 203
+|  -  |
+|  -  |
+|  -  |
+|  -  |
++-----+  frame 204
+|  -  |
+|  -  |
+| 86  |
+| 15  |
++-----+
+```
+
+a 2-level page table looks like
+
+```
++-----+  frame 200
+| 201 |
+|  -  |
+|  -  |
+| 204 |
++-----+
+
++-----+  frame 201
+| 12  |
+| 82  |
+|  -  |
+| 100 |
++-----+
+
++-----+  frame 204
+|  -  |
+|  -  |
+| 86  |
+| 15  |
++-----+
+```
+
+In a multi-level page table setting, we say a frame holding page table entries is invalid if every entry is invalid.
+
+Why do multi-level page tables save space?
+You can avoid mapping frames holding all-invalid page table entries.
+
+We need to get from page number to frame number.
+A multi-level page table is a sequence of data structures.
+Level n: A linear array whose i-th entry contains a valid bit and, if set, a frame number of a Level n-1 array.
+Level n-1: Linear arrays, one per frame. Each entry contains a valid bit and, if set, a frame number of a Level n-2 array.
+...
+Level 1: Linear arrays, one per frame. Each entry contains a valid bit and target frame number.
+
+With multi-level page tables, the page number divides into sections: Level n index, Level n-1 index, ..., Level 1 index.
+
+In a 3-level page table, how do you find frame number given page number?
+Index into Level 3 table, to get frame number of Level 2 chunk.
+If invalid, raise exception.
+Else, index into Level 2 chunk, to get frame number of Level 1 chunk.
+If invalid, raise exception.
+Else, index into Level 1 chunk to get the target frame number.
+If invalid, raise exception.
+Else, return.
+
+Space-savings of multi-level page tables.
+Suppose 64 pages, of which 0, 1 and 63 are mapped, and each frame can hold 4 entries:
+levels, frames, invalid entries
+1, 16, 61
+2, 4 + 2, 14 + 5
+3, 1 + 2 + 2, 2 + 6 + 5
+
+What is an inverted page table?
+A map from frames to process+page which is using it.
+
+## Chapter 21
+
+Why support larger-than-memory address spaces?
+It makes writing programs easier.
+
+Swap space is disk space reserved for swapping in/out memory pages.
+
+Visualize swap space:
+
+                 frame 0  frame 1  frame 2  frame 3  ...
+physical memory    0/0      1/2      1/3      2/0
+
+                 block 0  block 1  block 2  block 3  block 4  block 5  block 6  block 7  ...
+swap space         0/1     0/2      free      1/0      1/1      3/0      2/1      3/1
+
+
+(x/y means process x, page y)
+
+Pages may be swapped in from other than swap space, e.g. on-disk binaries.
+
+Accessing a page not in physical memory is often called a page fault.
+
+In virtually all systems, the OS handles page faults.
+
+When servicing a page fault, how does the OS know the page's disk address?
+The OS wrote it in the page table entry when swapping out the page.
+
+When swapping in a page but memory is full, the OS pages out some pages first, according to its page-replacement policy.
+
+A bad page-replacement policy can make programs run at disk-like speeds instead of memory-like speeds, e.g. 10K times slower or worse.
+
+Typically, when there OS sees fewer than "low watermark" free frames, the swap daemon (aka page daemon) evicts pages until "high watermark" frames are free.
