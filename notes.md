@@ -944,21 +944,26 @@ Swap space is disk space reserved for swapping in/out memory pages.
 Visualize swap space:
 
 ```
-                 frame 0  frame 1  frame 2  frame 3  ...
-physical memory    0/0      1/2      1/3      2/0
+                 frm 0  frm 1  frm 2  frm 3  ...
+physical memory   0/0    1/2    1/3    2/0
 
-                 block 0  block 1  block 2  block 3  block 4  block 5  block 6  block 7  ...
-swap space         0/1     0/2      free      1/0      1/1      3/0      2/1      3/1
+                 blk 0  blk 1  blk 2  blk 3  blk 4  blk 5  blk 6  blk 7  ...
+swap space        0/1    0/2   free    1/0    1/1    3/0    2/1    3/1
 ```
-
 
 (x/y means process x, page y)
 
-Pages may be swapped in from other than swap space, e.g. on-disk binaries.
+In a page table entry, the present bit flags whether the page is in physical memory (not e.g. swapped to disk).
 
-Accessing a page not in physical memory is often called a page fault.
+Pages may be swapped in from elsewhere than swap space, e.g. on-disk binaries.
+
+Accessing a page not in physical memory is often called a page fault, but might be better called a page miss, since the program is behaving fine.
 
 In virtually all systems, the OS handles page faults.
+
+Why does the OS, not hardware, handle page faults in virtually all systems?
+- Speed is not a concern, since disk access is the bottleneck.
+- Hardware shouldn't need to know all the swap details (e.g. how to issue I/O).
 
 When servicing a page fault, how does the OS know the page's disk address?
 The OS wrote it in the page table entry when swapping out the page.
@@ -967,7 +972,80 @@ When swapping in a page but memory is full, the OS pages out some pages first, a
 
 A bad page-replacement policy can make programs run at disk-like speeds instead of memory-like speeds, e.g. 10K times slower or worse.
 
+TLB miss cases:
+valid and present: update TLB, retry instruction
+valid and not present: raise page fault
+invalid: raise segfault
+
+Page-fault control flow:
+- find a free frame, evicting if necessary
+- disk read
+- update page table entry
+- retry instruction
+
 Typically, when the OS sees fewer than "low watermark" free frames, the swap daemon (aka page daemon) evicts pages until "high watermark" frames are free.
+
+## Chapter 22
+
+A program's average memory access time (AMAT) is T_M + P_{Miss} * T_D.
+
+If a program's hit rate is 90%, memory access is 100ns, disk access is 10ms, then what is its AMAT?
+100 + 0.1 * 10,000,000 = 1,000,100ns = 1.0001ms.
+
+Why calculate a program's AMAT as T_M + P_{miss} * T_D, not scaling T_M by P_{hit}?
+Because you pay T_M on a miss too, when retrying the instruction.
+
+Belady showed that the optimal cache replacement policy evicts the least soonest used.
+
+Assuming cache size 2, the optimal policy leads to:
+
+```
+access  hit   evict   cache
+1       n     -       1
+0       n     -       1,0
+2       n     1       0,2
+0       y     -       0,2  
+3       n     0       2,3
+2       y     -       2,3
+```
+
+A compulsory cache miss is the unavoidable miss when first referencing an item.
+
+Visualize OPT, LRU, FIFO, RAND's hit rate against cache size, against the non-locality workload (10,000 access to 100 pages, at random).
+
+![](cache_replacement/no-locality.png)
+
+Visualize OPT, LRU, FIFO, RAND's hit rate against cache size, against the 80/20 workload (8,000 accesses to 20 pages; 2,000 to 80 pages; at random).
+
+![](cache_replacement/80-20.png)
+
+Visualize OPT, LRU, FIFO, RAND's hit rate against cache size, against the looping-sequential workload (10,000 accesses to 0, 1, ..., 49, in a loop).
+
+![](cache_replacement/looping-sequential.png)
+
+Why not implement the LRU page-replacement policy, say by storing last-access time in page-table entries?
+Too expensive. You'd have to update on every access and scan the full list on eviction.
+
+Many modern systems' page-cache replacement policy is an approximation of LRU.
+
+Corbato's clock algorithm approximates the LRU page-replacement policy.
+How it works:
+- store a use bit per page, set to 1 by the hardware whenever the page is read or written
+- when you need to evict, cycle through pages:
+  - if use bit set, clear it
+  - else, evict
+
+Thrashing is when the combined memory demand of running processes exceeds physical memory, so the system spends most of its time paging.
+
+Two ways of dealing with thrashing:
+admission control: don't run some processes
+OOM killer: kill a memory-intensive process
+
+When disk-access is much slower than memory, the page-replacement policy matters less, because AMAT will be dominated by T_D.
+
+## TODO
+
+Need some way to generate good cards from these.
 
 vmstat notes:
 - Explain the output (us 1 in first line)? Average since boot.
