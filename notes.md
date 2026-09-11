@@ -943,11 +943,13 @@ Swap space is disk space reserved for swapping in/out memory pages.
 
 Visualize swap space:
 
+```
                  frame 0  frame 1  frame 2  frame 3  ...
 physical memory    0/0      1/2      1/3      2/0
 
                  block 0  block 1  block 2  block 3  block 4  block 5  block 6  block 7  ...
 swap space         0/1     0/2      free      1/0      1/1      3/0      2/1      3/1
+```
 
 
 (x/y means process x, page y)
@@ -965,4 +967,12 @@ When swapping in a page but memory is full, the OS pages out some pages first, a
 
 A bad page-replacement policy can make programs run at disk-like speeds instead of memory-like speeds, e.g. 10K times slower or worse.
 
-Typically, when there OS sees fewer than "low watermark" free frames, the swap daemon (aka page daemon) evicts pages until "high watermark" frames are free.
+Typically, when the OS sees fewer than "low watermark" free frames, the swap daemon (aka page daemon) evicts pages until "high watermark" frames are free.
+
+vmstat notes:
+- Explain the output (us 1 in first line)? Average since boot.
+- When running a CPU-bound program, explain why us is constant 8, not 100? Single-threaded, 12 cores.
+- Explain why free goes down only gradually after starting the process? Demand zero paging.
+- Explain why free doesn't jump back to original value immediately on killing the process?
+
+"Free memory is wasted memory. Low free and high available is healthy."
